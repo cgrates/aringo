@@ -8,7 +8,6 @@ Provides Asterisk ARI connector from Go programming language.
 package aringo
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 	"net/url"
@@ -31,7 +30,7 @@ func Fib() func() time.Duration {
 	}
 }
 
-func NewARInGO(wsUrl, wsOrigin string, evChannel chan *json.RawMessage, errChannel chan error, connectAttempts, reconnects int) (ari *ARInGO, err error) {
+func NewARInGO(wsUrl, wsOrigin string, evChannel chan map[string]interface{}, errChannel chan error, connectAttempts, reconnects int) (ari *ARInGO, err error) {
 	if connectAttempts == 0 {
 		return nil, ErrZeroConnectAttempts
 	}
@@ -61,10 +60,10 @@ type ARInGO struct {
 	ws             *websocket.Conn
 	reconnects     int
 	wsMux          *sync.RWMutex
-	evChannel      chan *json.RawMessage // Events coming from Asterisk are posted here
-	errChannel     chan error            // Errors are posted here
-	wsListenerExit chan struct{}         // Signal dispatcher to stop listening
-	wsListenerMux  *sync.Mutex           // Use it to get access to wsListenerExit recreation
+	evChannel      chan map[string]interface{} // Events coming from Asterisk are posted here
+	errChannel     chan error                  // Errors are posted here
+	wsListenerExit chan struct{}               // Signal dispatcher to stop listening
+	wsListenerMux  *sync.Mutex                 // Use it to get access to wsListenerExit recreation
 }
 
 // wsDispatcher listens for JSON rawMessages and stores them into the evChannel
@@ -74,13 +73,13 @@ func (ari *ARInGO) wsEventListener(chanExit chan struct{}) {
 		case <-chanExit:
 			break
 		default:
-			var data json.RawMessage
-			if err := websocket.JSON.Receive(ari.ws, &data); err != nil { // ToDo: Add reconnects here
+			var ev map[string]interface{}
+			if err := websocket.JSON.Receive(ari.ws, &ev); err != nil { // ToDo: Add reconnects here
 				ari.disconnect()
 				ari.errChannel <- err
 				return
 			}
-			ari.evChannel <- &data
+			ari.evChannel <- ev
 		}
 	}
 }
