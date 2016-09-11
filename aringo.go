@@ -8,13 +8,23 @@ Provides Asterisk ARI connector from Go programming language.
 package aringo
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
+	"io/ioutil"
 	"net/http"
 	"net/url"
 	"sync"
 	"time"
 
 	"golang.org/x/net/websocket"
+)
+
+const (
+	HTTP_POST = "POST"
+	HTTP_GET  = "GET"
 )
 
 var (
@@ -30,11 +40,17 @@ func Fib() func() time.Duration {
 	}
 }
 
-func NewARInGO(wsUrl, wsOrigin string, evChannel chan map[string]interface{}, errChannel chan error, connectAttempts, reconnects int) (ari *ARInGO, err error) {
+func NewErrUnexpectedReplyCode(statusCode int) error {
+	return fmt.Errorf("UNEXPECTED_REPLY_CODE: %d", statusCode)
+}
+
+func NewARInGO(wsUrl, wsOrigin, username, password, userAgent string,
+	evChannel chan map[string]interface{}, errChannel chan error, connectAttempts, reconnects int) (ari *ARInGO, err error) {
 	if connectAttempts == 0 {
 		return nil, ErrZeroConnectAttempts
 	}
-	ari = &ARInGO{httpClient: new(http.Client), wsUrl: wsUrl, wsOrigin: wsOrigin, reconnects: reconnects,
+	ari = &ARInGO{httpClient: new(http.Client), wsUrl: wsUrl, wsOrigin: wsOrigin,
+		username: username, password: password, userAgent: userAgent, reconnects: reconnects,
 		evChannel: evChannel, errChannel: errChannel,
 		wsMux: new(sync.RWMutex), wsListenerMux: new(sync.Mutex)}
 	delay := Fib()
@@ -57,6 +73,9 @@ type ARInGO struct {
 	httpClient     *http.Client
 	wsUrl          string
 	wsOrigin       string
+	username       string
+	password       string
+	userAgent      string
 	ws             *websocket.Conn
 	reconnects     int
 	wsMux          *sync.RWMutex
@@ -110,13 +129,44 @@ func (ari *ARInGO) disconnect() error {
 	return ari.ws.Close()
 }
 
-// Call represents one REST call to Asterisk using httpClient
-// Returns a http.Response so we can process additional data out of it
-func (ari *ARInGO) Call(url string, data url.Values, resp *http.Response) error {
-	if reply, err := ari.httpClient.PostForm(url, data); err != nil {
-		return err
-	} else {
-		*resp = *reply
+// Call represents one REST call to Asterisk using httpClient call
+// If there is a reply from Asterisk it should be in form map[string]interface{}
+func (ari *ARInGO) Call(method, reqUrl string, data url.Values) (reply map[string]interface{}, err error) {
+	var reqBody io.Reader
+	switch method {
+	case HTTP_GET: // Add data inside url
+		u, _ := url.ParseRequestURI(reqUrl)
+		u.RawQuery = data.Encode()
+		reqUrl = u.String()
+	case HTTP_POST:
+		reqBody = bytes.NewBufferString(data.Encode())
+	default:
+		return nil, fmt.Errorf("Unrecognized method: %s", method)
 	}
-	return nil
+	req, err := http.NewRequest(method, reqUrl, reqBody)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", ari.userAgent)
+	req.SetBasicAuth(ari.username, ari.password)
+	resp, err := ari.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	} else if resp.StatusCode == 204 { // No content status code
+		return nil, nil
+	} else if resp.StatusCode != 200 {
+		return nil, NewErrUnexpectedReplyCode(resp.StatusCode)
+	}
+	defer resp.Body.Close()
+	respBody, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if method != HTTP_GET {
+		return nil, nil
+	}
+	if err := json.Unmarshal(respBody, reply); err != nil {
+		return nil, err
+	}
+	return
 }
