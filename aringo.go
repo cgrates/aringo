@@ -23,8 +23,9 @@ import (
 )
 
 const (
-	HTTP_POST = "POST"
-	HTTP_GET  = "GET"
+	HTTP_POST   = "POST"
+	HTTP_GET    = "GET"
+	HTTP_DELETE = "DELETE"
 )
 
 var (
@@ -138,7 +139,7 @@ func (ari *ARInGO) Call(method, reqUrl string, data url.Values) (reply map[strin
 		u, _ := url.ParseRequestURI(reqUrl)
 		u.RawQuery = data.Encode()
 		reqUrl = u.String()
-	case HTTP_POST:
+	case HTTP_POST, HTTP_DELETE:
 		reqBody = bytes.NewBufferString(data.Encode())
 	default:
 		return nil, fmt.Errorf("Unrecognized method: %s", method)
@@ -165,7 +166,7 @@ func (ari *ARInGO) Call(method, reqUrl string, data url.Values) (reply map[strin
 	if method != HTTP_GET {
 		return nil, nil
 	}
-	if err := json.Unmarshal(respBody, reply); err != nil {
+	if err := json.Unmarshal(respBody, &reply); err != nil {
 		return nil, err
 	}
 	return
