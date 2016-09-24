@@ -96,6 +96,14 @@ func (ari *ARInGO) wsEventListener(chanExit chan struct{}) {
 			var ev map[string]interface{}
 			if err := websocket.JSON.Receive(ari.ws, &ev); err != nil { // ToDo: Add reconnects here
 				ari.disconnect()
+				delay := Fib()
+				for i := 0; i < ari.reconnects; i++ { // attempt reconnect
+					if errConn := ari.connect(); errConn == nil { // give up on success since another goroutine will pick up events
+						return
+					}
+					time.Sleep(delay())
+				}
+				// reconnect did not succeed, pass the original error and give up
 				ari.errChannel <- err
 				return
 			}
