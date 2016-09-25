@@ -133,7 +133,10 @@ func (ari *ARInGO) connect() (err error) {
 
 func (ari *ARInGO) disconnect() error {
 	ari.wsListenerMux.Lock()
-	close(ari.wsListenerExit) // Order previous listener to stop
+	if ari.wsListenerExit != nil {
+		close(ari.wsListenerExit) // Order previous listener to stop
+		ari.wsListenerExit = nil
+	}
 	ari.wsListenerMux.Unlock()
 	return ari.ws.Close()
 }
