@@ -9,7 +9,6 @@ package aringo
 
 import (
 	"bytes"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -143,7 +142,7 @@ func (ari *ARInGO) disconnect() error {
 
 // Call represents one REST call to Asterisk using httpClient call
 // If there is a reply from Asterisk it should be in form map[string]interface{}
-func (ari *ARInGO) Call(method, reqUrl string, data url.Values) (reply map[string]interface{}, err error) {
+func (ari *ARInGO) Call(method, reqUrl string, data url.Values) (reply []byte, err error) {
 	var reqBody io.Reader
 	switch method {
 	case HTTP_GET: // Add data inside url
@@ -177,8 +176,6 @@ func (ari *ARInGO) Call(method, reqUrl string, data url.Values) (reply map[strin
 	if method != HTTP_GET {
 		return nil, nil
 	}
-	if err := json.Unmarshal(respBody, &reply); err != nil {
-		return nil, err
-	}
-	return
+	return respBody, nil
+
 }
