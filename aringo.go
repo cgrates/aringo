@@ -15,7 +15,6 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/url"
-	"sync"
 	"time"
 
 	"golang.org/x/net/websocket"
@@ -31,7 +30,7 @@ var (
 	ErrZeroConnectAttempts = errors.New("ZERO_CONNECT_ATTEMPTS")
 )
 
-// successive Fibonacci numbers.
+// Fib returns successive Fibonacci numbers.
 func Fib() func() time.Duration {
 	a, b := 0, 1
 	return func() time.Duration {
@@ -45,25 +44,30 @@ func NewErrUnexpectedReplyCode(statusCode int) error {
 }
 
 func NewARInGO(wsUrl, wsOrigin, username, password, userAgent string,
-	evChannel chan map[string]interface{}, errChannel chan error, connectAttempts, reconnects int) (ari *ARInGO, err error) {
+	evChannel chan map[string]interface{}, errChannel chan error, stopChan <-chan struct{}, connectAttempts, reconnects int) (ari *ARInGO, err error) {
 	if connectAttempts == 0 {
 		return nil, ErrZeroConnectAttempts
 	}
-	ari = &ARInGO{httpClient: new(http.Client), wsUrl: wsUrl, wsOrigin: wsOrigin,
-		username: username, password: password, userAgent: userAgent, reconnects: reconnects,
-		evChannel: evChannel, errChannel: errChannel,
-		wsMux: new(sync.RWMutex), wsListenerMux: new(sync.Mutex)}
-	delay := Fib()
-	i := 0
-	for {
-		if err = ari.connect(); err == nil {
-			break
+	ari = &ARInGO{
+		httpClient:     new(http.Client),
+		wsURL:          wsUrl,
+		wsOrigin:       wsOrigin,
+		username:       username,
+		password:       password,
+		userAgent:      userAgent,
+		reconnects:     reconnects,
+		evChannel:      evChannel,
+		errChannel:     errChannel,
+		wsListenerExit: stopChan,
+	}
+	if err = ari.connect(); err != nil {
+		delay := Fib()
+		for i := 0; connectAttempts == -1 || i < connectAttempts-1; i++ { // -1 for infinite attempts
+			time.Sleep(delay()) // Increased delay to randomize network load
+			if err = ari.connect(); err == nil {
+				return
+			}
 		}
-		i++
-		if connectAttempts != -1 && i >= connectAttempts { // -1 for infinite attempts
-			break
-		}
-		time.Sleep(delay()) // Increased delay to randomize network load
 	}
 	return
 }
@@ -71,111 +75,106 @@ func NewARInGO(wsUrl, wsOrigin, username, password, userAgent string,
 // ARInGO represents one ARI connection/application
 type ARInGO struct {
 	httpClient     *http.Client
-	wsUrl          string
+	wsURL          string
 	wsOrigin       string
 	username       string
 	password       string
 	userAgent      string
 	ws             *websocket.Conn
 	reconnects     int
-	wsMux          *sync.RWMutex
 	evChannel      chan map[string]interface{} // Events coming from Asterisk are posted here
 	errChannel     chan error                  // Errors are posted here
-	wsListenerExit chan struct{}               // Signal dispatcher to stop listening
-	wsListenerMux  *sync.Mutex                 // Use it to get access to wsListenerExit recreation
+	wsListenerExit <-chan struct{}             // Signal dispatcher to stop listening
 }
 
 // wsDispatcher listens for JSON rawMessages and stores them into the evChannel
-func (ari *ARInGO) wsEventListener(chanExit chan struct{}) {
+func (ari *ARInGO) wsEventListener() {
 	for {
 		select {
-		case <-chanExit:
-			break
+		case <-ari.wsListenerExit:
+			ari.disconnect()
+			return
 		default:
-			var ev map[string]interface{}
-			if err := websocket.JSON.Receive(ari.ws, &ev); err != nil { // ToDo: Add reconnects here
-				ari.disconnect()
+		}
+		var ev map[string]interface{}
+		if err := websocket.JSON.Receive(ari.ws, &ev); err != nil {
+			ari.disconnect()
+			select {
+			case <-ari.wsListenerExit:
+				return // if the chanel was closed already do not try to reconnect
+			default:
+			}
+			if errConn := ari.connect(); errConn != nil { // give up on success since another goroutine will pick up events
 				delay := Fib()
-				for i := 0; i < ari.reconnects; i++ { // attempt reconnect
+				for i := 0; i < ari.reconnects-1; i++ { // attempt reconnect
+					time.Sleep(delay())
 					if errConn := ari.connect(); errConn == nil { // give up on success since another goroutine will pick up events
 						return
 					}
-					time.Sleep(delay())
 				}
 				// reconnect did not succeed, pass the original error and give up
 				ari.errChannel <- err
-				return
 			}
-			ari.evChannel <- ev
+			return
 		}
+		ari.evChannel <- ev
 	}
 }
 
 // connect connects to Asterisk Websocket and starts listener
 func (ari *ARInGO) connect() (err error) {
-	ari.wsMux.Lock()
-	defer ari.wsMux.Unlock()
-	ari.ws, err = websocket.Dial(ari.wsUrl, "", ari.wsOrigin)
-	if err != nil {
+	if ari.ws, err = websocket.Dial(ari.wsURL, "", ari.wsOrigin); err != nil {
 		return
 	}
 	// Connected, start listener
-	ari.wsListenerMux.Lock()
-	if ari.wsListenerExit != nil {
-		close(ari.wsListenerExit) // Order previous listener to stop before proceeding
-	}
-	ari.wsListenerExit = make(chan struct{})
-	go ari.wsEventListener(ari.wsListenerExit)
-	ari.wsListenerMux.Unlock()
-	return nil
+	go ari.wsEventListener()
+	return
 }
 
 func (ari *ARInGO) disconnect() error {
-	ari.wsListenerMux.Lock()
-	if ari.wsListenerExit != nil {
-		close(ari.wsListenerExit) // Order previous listener to stop
-		ari.wsListenerExit = nil
-	}
-	ari.wsListenerMux.Unlock()
 	return ari.ws.Close()
 }
 
 // Call represents one REST call to Asterisk using httpClient call
 // If there is a reply from Asterisk it should be in form map[string]interface{}
-func (ari *ARInGO) Call(method, reqUrl string, data url.Values) (reply []byte, err error) {
+func (ari *ARInGO) Call(method, reqURL string, data url.Values) (reply []byte, err error) {
 	var reqBody io.Reader
 	switch method {
 	case HTTP_GET: // Add data inside url
-		u, _ := url.ParseRequestURI(reqUrl)
+		u, _ := url.ParseRequestURI(reqURL)
 		u.RawQuery = data.Encode()
-		reqUrl = u.String()
+		reqURL = u.String()
 	case HTTP_POST, HTTP_DELETE:
 		reqBody = bytes.NewBufferString(data.Encode())
 	default:
-		return nil, fmt.Errorf("Unrecognized method: %s", method)
+		err = fmt.Errorf("Unrecognized method: %s", method)
+		return
 	}
-	req, err := http.NewRequest(method, reqUrl, reqBody)
-	if err != nil {
-		return nil, err
+	var req *http.Request
+	if req, err = http.NewRequest(method, reqURL, reqBody); err != nil {
+		return
 	}
 	req.Header.Set("User-Agent", ari.userAgent)
 	req.SetBasicAuth(ari.username, ari.password)
-	resp, err := ari.httpClient.Do(req)
-	if err != nil {
-		return nil, err
-	} else if resp.StatusCode == 204 { // No content status code
-		return nil, nil
-	} else if resp.StatusCode != 200 {
-		return nil, NewErrUnexpectedReplyCode(resp.StatusCode)
+	var resp *http.Response
+	if resp, err = ari.httpClient.Do(req); err != nil {
+		return
 	}
-	defer resp.Body.Close()
-	respBody, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
+	if resp.StatusCode == 204 { // No content status code
+		return
 	}
-	if method != HTTP_GET {
-		return nil, nil
+	if resp.StatusCode != 200 {
+		err = NewErrUnexpectedReplyCode(resp.StatusCode)
+		return
 	}
-	return respBody, nil
+	var respBody []byte
+	respBody, err = ioutil.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil ||
+		method != HTTP_GET {
+		return
+	}
+	reply = respBody
+	return
 
 }
