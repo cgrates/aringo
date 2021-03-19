@@ -12,6 +12,7 @@ package aringo
 import (
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"reflect"
 	"strings"
 	"testing"
@@ -226,22 +227,240 @@ func TestAringowsEventListenerReconnect(t *testing.T) {
 	// }
 }
 
-// func TestAringowsEventListenerFailReconnect(t *testing.T) {
-// 	var srv *httptest.Server
-// 	srv = httptest.NewServer(websocket.Handler(func(c *websocket.Conn) {
+func TestAringowsEventListenerInvalidJSONReturn(t *testing.T) {
+	stopChan := make(chan struct{})
+	var srv *httptest.Server
 
-// 	}))
-// 	defer srv.Close()
+	ari := &ARInGO{
+		httpClient:     new(http.Client),
+		username:       "",
+		password:       "",
+		userAgent:      "",
+		reconnects:     100,
+		evChannel:      make(chan map[string]interface{}),
+		errChannel:     make(chan error, 1),
+		wsListenerExit: stopChan,
+	}
+	srv = httptest.NewServer(websocket.Handler(func(c *websocket.Conn) {
+		urll := ari.wsURL
+		ari.wsURL = "invalidURL"
+		c.Write([]byte("invalid"))
+		time.Sleep(20 * time.Millisecond)
+		ari.wsURL = urll
+		c.Close()
 
-// 	n := strings.LastIndexByte(srv.URL, ':')
-// 	wsOrigin := srv.URL[:n] + "/"
-// 	wsUrl := "ws" + strings.TrimPrefix(srv.URL, "http") + "/"
+	}))
+	defer srv.Close()
+
+	n := strings.LastIndexByte(srv.URL, ':')
+	ari.wsOrigin = srv.URL[:n] + "/"
+	ari.wsURL = "ws" + strings.TrimPrefix(srv.URL, "http") + "/"
+
+	var err error
+	ari.ws, err = websocket.Dial(ari.wsURL, "", ari.wsOrigin)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ari.wsEventListener()
+	close(stopChan)
+}
+
+func TestAringowsEventListenerFailReconnect(t *testing.T) {
+	stopChan := make(chan struct{})
+	var srv *httptest.Server
+
+	ari := &ARInGO{
+		httpClient:     new(http.Client),
+		username:       "",
+		password:       "",
+		userAgent:      "",
+		reconnects:     0,
+		evChannel:      make(chan map[string]interface{}),
+		errChannel:     make(chan error, 1),
+		wsListenerExit: stopChan,
+	}
+	srv = httptest.NewServer(websocket.Handler(func(c *websocket.Conn) {
+		urll := ari.wsURL
+		ari.wsURL = "invalidURL"
+		c.Write([]byte("invalid"))
+		time.Sleep(20 * time.Millisecond)
+		ari.wsURL = urll
+		c.Close()
+
+	}))
+	defer srv.Close()
+
+	n := strings.LastIndexByte(srv.URL, ':')
+	ari.wsOrigin = srv.URL[:n] + "/"
+	ari.wsURL = "ws" + strings.TrimPrefix(srv.URL, "http") + "/"
+
+	var err error
+	ari.ws, err = websocket.Dial(ari.wsURL, "", ari.wsOrigin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ari.wsEventListener()
+	exp := "invalid character 'i' looking for beginning of value"
+	rcv := <-ari.errChannel
+
+	if exp != rcv.Error() {
+		t.Errorf("\nExpected: <%+v>, \nReceived: <%+v>", exp, rcv)
+	}
+	close(stopChan)
+}
+
+func TestAringoCallUnrecognizedMethod(t *testing.T) {
+	stopChan := make(chan struct{})
+	var srv *httptest.Server
+	ari := &ARInGO{
+		httpClient:     new(http.Client),
+		username:       "",
+		password:       "",
+		userAgent:      "",
+		reconnects:     -1,
+		evChannel:      make(chan map[string]interface{}),
+		errChannel:     make(chan error),
+		wsListenerExit: stopChan,
+	}
+	srv = httptest.NewServer(websocket.Handler(func(c *websocket.Conn) {
+
+	}))
+	defer srv.Close()
+
+	n := strings.LastIndexByte(srv.URL, ':')
+	ari.wsOrigin = srv.URL[:n] + "/"
+	ari.wsURL = "ws" + strings.TrimPrefix(srv.URL, "http") + "/"
+
+	data := url.Values{}
+	data.Set("test", "string")
+	data.Add("key", "value1")
+	data.Add("key", "value2")
+	data.Add("key", "value3")
+	experr := "Unrecognized method: invalid"
+	rply, err := ari.Call("invalid", ari.wsURL, data)
+
+	if err == nil || err.Error() != experr {
+		t.Errorf("\nExpected: <%+v>, \nReceived: <%+v>", experr, err)
+	} else if rply != nil {
+		t.Errorf("\nExpected: <%+v>, \nReceived: <%+v>", nil, rply)
+	}
+}
+
+func TestAringoCallInvalidURL(t *testing.T) {
+	stopChan := make(chan struct{})
+	var srv *httptest.Server
+	ari := &ARInGO{
+		httpClient:     new(http.Client),
+		username:       "",
+		password:       "",
+		userAgent:      "",
+		reconnects:     -1,
+		evChannel:      make(chan map[string]interface{}),
+		errChannel:     make(chan error),
+		wsListenerExit: stopChan,
+	}
+	srv = httptest.NewServer(websocket.Handler(func(c *websocket.Conn) {
+
+	}))
+	defer srv.Close()
+
+	n := strings.LastIndexByte(srv.URL, ':')
+	ari.wsOrigin = srv.URL[:n] + "/"
+	ari.wsURL = "ws" + strings.TrimPrefix(srv.URL, "http") + "/"
+
+	data := url.Values{}
+	data.Set("test", "string")
+	data.Add("key", "value1")
+	data.Add("key", "value2")
+	data.Add("key", "value3")
+	experr := "parse \":foo\": missing protocol scheme"
+	rply, err := ari.Call(HTTP_POST, ":foo", data)
+
+	if err == nil || err.Error() != experr {
+		t.Errorf("\nExpected: <%+v>, \nReceived: <%+v>", experr, err)
+	} else if rply != nil {
+		t.Errorf("\nExpected: <%+v>, \nReceived: <%+v>", nil, rply)
+	}
+}
+
+func TestAringoCallUnexpectedReply(t *testing.T) {
+	stopChan := make(chan struct{})
+	var srv *httptest.Server
+	ari := &ARInGO{
+		httpClient:     new(http.Client),
+		username:       "",
+		password:       "",
+		userAgent:      "",
+		reconnects:     -1,
+		evChannel:      make(chan map[string]interface{}),
+		errChannel:     make(chan error),
+		wsListenerExit: stopChan,
+	}
+	srv = httptest.NewServer(websocket.Handler(func(c *websocket.Conn) {
+
+	}))
+	defer srv.Close()
+
+	n := strings.LastIndexByte(srv.URL, ':')
+	ari.wsOrigin = srv.URL[:n] + "/"
+	ari.wsURL = "ws" + strings.TrimPrefix(srv.URL, "http") + "/"
+
+	data := url.Values{}
+	data.Set("test", "string")
+	data.Add("key", "value1")
+	data.Add("key", "value2")
+	data.Add("key", "value3")
+	experr := "UNEXPECTED_REPLY_CODE: 405"
+	rply, err := ari.Call(HTTP_DELETE, ari.wsOrigin, data)
+	if err == nil || err.Error() != experr {
+		t.Errorf("\nExpected: <%+v>, \nReceived: <%+v>", experr, err)
+	} else if rply != nil {
+		t.Errorf("\nExpected: <%+v>, \nReceived: <%+v>", nil, rply)
+	}
+}
+
+func TestAringoCall1(t *testing.T) {
+	stopChan := make(chan struct{})
+	var srv *httptest.Server
+	ari := &ARInGO{
+		httpClient:     new(http.Client),
+		username:       "",
+		password:       "",
+		userAgent:      "",
+		reconnects:     -1,
+		evChannel:      make(chan map[string]interface{}),
+		errChannel:     make(chan error),
+		wsListenerExit: stopChan,
+	}
+	srv = httptest.NewServer(websocket.Handler(func(c *websocket.Conn) {
+
+	}))
+	defer srv.Close()
+
+	n := strings.LastIndexByte(srv.URL, ':')
+	ari.wsOrigin = srv.URL[:n] + "/"
+	ari.wsURL = "ws" + strings.TrimPrefix(srv.URL, "http") + "/"
+
+	data := url.Values{}
+	data.Set("test", "string")
+	data.Add("key", "value1")
+	data.Add("key", "value2")
+	data.Add("key", "value3")
+
+	rply, err := ari.Call(HTTP_POST, ari.wsOrigin, data)
+	if err != nil {
+		t.Errorf("\nExpected: <%+v>, \nReceived: <%+v>", nil, err)
+	} else if rply != nil {
+		t.Errorf("\nExpected: <%+v>, \nReceived: <%+v>", nil, rply)
+	}
+}
+
+// func TestAringoCall2(t *testing.T) {
 // 	stopChan := make(chan struct{})
-
+// 	var srv *httptest.Server
 // 	ari := &ARInGO{
 // 		httpClient:     new(http.Client),
-// 		wsURL:          wsUrl,
-// 		wsOrigin:       wsOrigin,
 // 		username:       "",
 // 		password:       "",
 // 		userAgent:      "",
@@ -250,14 +469,25 @@ func TestAringowsEventListenerReconnect(t *testing.T) {
 // 		errChannel:     make(chan error),
 // 		wsListenerExit: stopChan,
 // 	}
+// 	srv = httptest.NewServer(websocket.Handler(func(c *websocket.Conn) {
 
-// 	var err error
-// 	ari.ws, err = websocket.Dial(ari.wsURL, "", ari.wsOrigin)
-// 	if err != nil {
-// 		t.Fatal(err)
-// 	}
+// 	}))
+// 	defer srv.Close()
 
-// 	close(stopChan)
-// 	ari.wsEventListener()
+// 	n := strings.LastIndexByte(srv.URL, ':')
+// 	ari.wsOrigin = srv.URL[:n] + "/"
+// 	ari.wsURL = "ws" + strings.TrimPrefix(srv.URL, "http") + "/"
 
+// 	data := url.Values{}
+// 	data.Set("test", "string")
+// 	data.Add("key", "value1")
+// 	data.Add("key", "value2")
+// 	data.Add("key", "value3")
+// 	expected := make([]byte, 0)
+// 	rply, err = ari.Call(HTTP_GET, ari.wsOrigin, data)
+// 	// if err != nil {
+// 	// 	t.Errorf("\nExpected: <%+v>, \nReceived: <%+v>", nil, err)
+// 	// } else if rply != expected {
+// 	// 	t.Errorf("\nExpected: <%+v>, \nReceived: <%+v>", nil, rply)
+// 	// }
 // }
