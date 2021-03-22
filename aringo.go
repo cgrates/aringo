@@ -12,7 +12,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"net/url"
 	"time"
@@ -168,7 +167,7 @@ func (ari *ARInGO) Call(method, reqURL string, data url.Values) (reply []byte, e
 		return
 	}
 	var respBody []byte
-	respBody, err = ioutil.ReadAll(resp.Body)
+	respBody, err = io.ReadAll(resp.Body)
 	resp.Body.Close()
 	if err != nil ||
 		method != HTTP_GET {
