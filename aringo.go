@@ -110,7 +110,7 @@ func (ari *ARInGO) wsEventListener() {
 				delay := Fib()
 				for i := 0; i < ari.reconnects-1; i++ { // attempt reconnect
 					delayValue := delay()
-					if ari.maxReconnectInterval <= 0 && ari.maxReconnectInterval < delayValue {
+					if ari.maxReconnectInterval > 0 && ari.maxReconnectInterval < delayValue {
 						delayValue = ari.maxReconnectInterval
 					}
 					time.Sleep(delayValue)
