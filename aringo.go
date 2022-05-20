@@ -42,22 +42,24 @@ func NewErrUnexpectedReplyCode(statusCode int) error {
 	return fmt.Errorf("UNEXPECTED_REPLY_CODE: %d", statusCode)
 }
 
-func NewARInGO(wsUrl, wsOrigin, username, password, userAgent string,
-	evChannel chan map[string]interface{}, errChannel chan error, stopChan <-chan struct{}, connectAttempts, reconnects int) (ari *ARInGO, err error) {
+func NewARInGO(wsUrl, wsOrigin, username, password, userAgent string, evChannel chan map[string]interface{},
+	errChannel chan error, stopChan <-chan struct{}, connectAttempts, reconnects int,
+	maxReconnectInterval time.Duration) (ari *ARInGO, err error) {
 	if connectAttempts == 0 {
 		return nil, ErrZeroConnectAttempts
 	}
 	ari = &ARInGO{
-		httpClient:     new(http.Client),
-		wsURL:          wsUrl,
-		wsOrigin:       wsOrigin,
-		username:       username,
-		password:       password,
-		userAgent:      userAgent,
-		reconnects:     reconnects,
-		evChannel:      evChannel,
-		errChannel:     errChannel,
-		wsListenerExit: stopChan,
+		httpClient:           new(http.Client),
+		wsURL:                wsUrl,
+		wsOrigin:             wsOrigin,
+		username:             username,
+		password:             password,
+		userAgent:            userAgent,
+		reconnects:           reconnects,
+		maxReconnectInterval: maxReconnectInterval,
+		evChannel:            evChannel,
+		errChannel:           errChannel,
+		wsListenerExit:       stopChan,
 	}
 	if err = ari.connect(); err != nil {
 		delay := Fib()
@@ -73,17 +75,18 @@ func NewARInGO(wsUrl, wsOrigin, username, password, userAgent string,
 
 // ARInGO represents one ARI connection/application
 type ARInGO struct {
-	httpClient     *http.Client
-	wsURL          string
-	wsOrigin       string
-	username       string
-	password       string
-	userAgent      string
-	ws             *websocket.Conn
-	reconnects     int
-	evChannel      chan map[string]interface{} // Events coming from Asterisk are posted here
-	errChannel     chan error                  // Errors are posted here
-	wsListenerExit <-chan struct{}             // Signal dispatcher to stop listening
+	httpClient           *http.Client
+	wsURL                string
+	wsOrigin             string
+	username             string
+	password             string
+	userAgent            string
+	ws                   *websocket.Conn
+	reconnects           int
+	maxReconnectInterval time.Duration
+	evChannel            chan map[string]interface{} // Events coming from Asterisk are posted here
+	errChannel           chan error                  // Errors are posted here
+	wsListenerExit       <-chan struct{}             // Signal dispatcher to stop listening
 }
 
 // wsDispatcher listens for JSON rawMessages and stores them into the evChannel
@@ -106,7 +109,11 @@ func (ari *ARInGO) wsEventListener() {
 			if errConn := ari.connect(); errConn != nil { // give up on success since another goroutine will pick up events
 				delay := Fib()
 				for i := 0; i < ari.reconnects-1; i++ { // attempt reconnect
-					time.Sleep(delay())
+					delayValue := delay()
+					if ari.maxReconnectInterval <= 0 && ari.maxReconnectInterval < delayValue {
+						delayValue = ari.maxReconnectInterval
+					}
+					time.Sleep(delayValue)
 					if errConn := ari.connect(); errConn == nil { // give up on success since another goroutine will pick up events
 						return
 					}
