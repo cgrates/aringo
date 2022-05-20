@@ -72,7 +72,7 @@ func TestAringoNewARInGONoConnAttempts(t *testing.T) {
 	reconnects := -1
 
 	experr := ErrZeroConnectAttempts
-	received, err := NewARInGO(wsUrl, wsOrigin, username, password, userAgent, evChannel, errChannel, stopChan, connectAttempts, reconnects)
+	received, err := NewARInGO(wsUrl, wsOrigin, username, password, userAgent, evChannel, errChannel, stopChan, connectAttempts, reconnects, 0)
 
 	if err != experr {
 		t.Errorf("\nExpected: <%+v>, \nReceived: <%+v>", experr, err)
@@ -112,7 +112,7 @@ func TestAringoNewARInGO(t *testing.T) {
 		errChannel:     errChannel,
 		wsListenerExit: stopChan,
 	}
-	received, err := NewARInGO(wsUrl, wsOrigin, username, password, userAgent, evChannel, errChannel, stopChan, connectAttempts, reconnects)
+	received, err := NewARInGO(wsUrl, wsOrigin, username, password, userAgent, evChannel, errChannel, stopChan, connectAttempts, reconnects, 0)
 	expected.httpClient = received.httpClient
 	expected.ws = received.ws
 
@@ -142,7 +142,7 @@ func TestAringoNewARInGO(t *testing.T) {
 
 	}()
 
-	received, err = NewARInGO(wsUrl, wsOrigin, username, password, userAgent, evChannel, errChannel, stopChan, connectAttempts, reconnects)
+	received, err = NewARInGO(wsUrl, wsOrigin, username, password, userAgent, evChannel, errChannel, stopChan, connectAttempts, reconnects, 0)
 
 	expected.httpClient = received.httpClient
 	expected.ws = received.ws
