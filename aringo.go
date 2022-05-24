@@ -29,22 +29,13 @@ var (
 	ErrZeroConnectAttempts = errors.New("ZERO_CONNECT_ATTEMPTS")
 )
 
-// Fib returns successive Fibonacci numbers.
-func Fib() func() time.Duration {
-	a, b := 0, 1
-	return func() time.Duration {
-		a, b = b, a+b
-		return time.Duration(a) * time.Second
-	}
-}
-
 func NewErrUnexpectedReplyCode(statusCode int) error {
 	return fmt.Errorf("UNEXPECTED_REPLY_CODE: %d", statusCode)
 }
 
 func NewARInGO(wsUrl, wsOrigin, username, password, userAgent string, evChannel chan map[string]interface{},
 	errChannel chan error, stopChan <-chan struct{}, connectAttempts, reconnects int,
-	maxReconnectInterval time.Duration) (ari *ARInGO, err error) {
+	maxReconnectInterval time.Duration, delayFunc func(time.Duration, time.Duration) func() time.Duration) (ari *ARInGO, err error) {
 	if connectAttempts == 0 {
 		return nil, ErrZeroConnectAttempts
 	}
@@ -57,12 +48,13 @@ func NewARInGO(wsUrl, wsOrigin, username, password, userAgent string, evChannel 
 		userAgent:            userAgent,
 		reconnects:           reconnects,
 		maxReconnectInterval: maxReconnectInterval,
+		delayFunc:            delayFunc,
 		evChannel:            evChannel,
 		errChannel:           errChannel,
 		wsListenerExit:       stopChan,
 	}
 	if err = ari.connect(); err != nil {
-		delay := Fib()
+		delay := ari.delayFunc(time.Second, 0)
 		for i := 0; connectAttempts == -1 || i < connectAttempts-1; i++ { // -1 for infinite attempts
 			time.Sleep(delay()) // Increased delay to randomize network load
 			if err = ari.connect(); err == nil {
@@ -84,9 +76,10 @@ type ARInGO struct {
 	ws                   *websocket.Conn
 	reconnects           int
 	maxReconnectInterval time.Duration
-	evChannel            chan map[string]interface{} // Events coming from Asterisk are posted here
-	errChannel           chan error                  // Errors are posted here
-	wsListenerExit       <-chan struct{}             // Signal dispatcher to stop listening
+	delayFunc            func(time.Duration, time.Duration) func() time.Duration // used to create/reset the delay function
+	evChannel            chan map[string]interface{}                             // Events coming from Asterisk are posted here
+	errChannel           chan error                                              // Errors are posted here
+	wsListenerExit       <-chan struct{}                                         // Signal dispatcher to stop listening
 }
 
 // wsDispatcher listens for JSON rawMessages and stores them into the evChannel
@@ -107,13 +100,9 @@ func (ari *ARInGO) wsEventListener() {
 			default:
 			}
 			if errConn := ari.connect(); errConn != nil { // give up on success since another goroutine will pick up events
-				delay := Fib()
+				delay := ari.delayFunc(time.Second, ari.maxReconnectInterval)
 				for i := 0; i < ari.reconnects-1; i++ { // attempt reconnect
-					delayValue := delay()
-					if ari.maxReconnectInterval > 0 && ari.maxReconnectInterval < delayValue {
-						delayValue = ari.maxReconnectInterval
-					}
-					time.Sleep(delayValue)
+					time.Sleep(delay())
 					if errConn := ari.connect(); errConn == nil { // give up on success since another goroutine will pick up events
 						return
 					}

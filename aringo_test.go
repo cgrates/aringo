@@ -22,7 +22,7 @@ import (
 )
 
 func TestAringoFib(t *testing.T) {
-	fib := Fib()
+	fib := fibDuration(time.Second, 0)
 	expected := 1 * time.Second
 	f := fib()
 	if expected != f {
@@ -72,7 +72,8 @@ func TestAringoNewARInGONoConnAttempts(t *testing.T) {
 	reconnects := -1
 
 	experr := ErrZeroConnectAttempts
-	received, err := NewARInGO(wsUrl, wsOrigin, username, password, userAgent, evChannel, errChannel, stopChan, connectAttempts, reconnects, 0)
+	received, err := NewARInGO(wsUrl, wsOrigin, username, password, userAgent, evChannel,
+		errChannel, stopChan, connectAttempts, reconnects, 0, fibDuration)
 
 	if err != experr {
 		t.Errorf("\nExpected: <%+v>, \nReceived: <%+v>", experr, err)
@@ -112,9 +113,11 @@ func TestAringoNewARInGO(t *testing.T) {
 		errChannel:     errChannel,
 		wsListenerExit: stopChan,
 	}
-	received, err := NewARInGO(wsUrl, wsOrigin, username, password, userAgent, evChannel, errChannel, stopChan, connectAttempts, reconnects, 0)
+	received, err := NewARInGO(wsUrl, wsOrigin, username, password, userAgent, evChannel,
+		errChannel, stopChan, connectAttempts, reconnects, 0, fibDuration)
 	expected.httpClient = received.httpClient
 	expected.ws = received.ws
+	received.delayFunc = nil
 
 	if err != nil {
 		t.Errorf("\nExpected: <%+v>, \nReceived: <%+v>", nil, err)
@@ -142,10 +145,12 @@ func TestAringoNewARInGO(t *testing.T) {
 
 	}()
 
-	received, err = NewARInGO(wsUrl, wsOrigin, username, password, userAgent, evChannel, errChannel, stopChan, connectAttempts, reconnects, 0)
+	received, err = NewARInGO(wsUrl, wsOrigin, username, password, userAgent, evChannel,
+		errChannel, stopChan, connectAttempts, reconnects, 0, fibDuration)
 
 	expected.httpClient = received.httpClient
 	expected.ws = received.ws
+	received.delayFunc = nil
 
 	if err != nil {
 		t.Errorf("\nExpected: <%+v>, \nReceived: <%+v>", nil, err)
@@ -180,6 +185,7 @@ func TestAringowsEventListenerValidJSON(t *testing.T) {
 		password:       "",
 		userAgent:      "",
 		reconnects:     -1,
+		delayFunc:      fibDuration,
 		evChannel:      make(chan map[string]interface{}, 1),
 		errChannel:     make(chan error, 1),
 		wsListenerExit: stopChan,
@@ -235,6 +241,7 @@ func TestAringowsEventListenerClosedCh(t *testing.T) {
 		password:       "",
 		userAgent:      "",
 		reconnects:     -1,
+		delayFunc:      fibDuration,
 		evChannel:      make(chan map[string]interface{}, 1),
 		errChannel:     make(chan error, 1),
 		wsListenerExit: stopChan,
@@ -277,6 +284,7 @@ func TestAringowsEventListenerReconnect(t *testing.T) {
 		password:       "",
 		userAgent:      "",
 		reconnects:     -1,
+		delayFunc:      fibDuration,
 		evChannel:      make(chan map[string]interface{}, 1),
 		errChannel:     make(chan error, 1),
 		wsListenerExit: stopChan,
@@ -308,6 +316,7 @@ func TestAringowsEventListenerInvalidJSONReturn(t *testing.T) {
 		password:       "",
 		userAgent:      "",
 		reconnects:     100,
+		delayFunc:      fibDuration,
 		evChannel:      make(chan map[string]interface{}),
 		errChannel:     make(chan error, 1),
 		wsListenerExit: stopChan,
@@ -355,6 +364,7 @@ func TestAringowsEventListenerFailReconnect(t *testing.T) {
 		password:       "",
 		userAgent:      "",
 		reconnects:     0,
+		delayFunc:      fibDuration,
 		evChannel:      make(chan map[string]interface{}),
 		errChannel:     make(chan error, 1),
 		wsListenerExit: stopChan,
@@ -401,7 +411,9 @@ func TestAringowsEventListenerFailReconnect(t *testing.T) {
 }
 
 func TestAringoCallUnrecognizedMethod(t *testing.T) {
-	ari := &ARInGO{}
+	ari := &ARInGO{
+		delayFunc: fibDuration,
+	}
 	var data url.Values
 
 	experr := "Unrecognized method: invalid"
@@ -415,7 +427,9 @@ func TestAringoCallUnrecognizedMethod(t *testing.T) {
 }
 
 func TestAringoCallInvalidURL(t *testing.T) {
-	ari := &ARInGO{}
+	ari := &ARInGO{
+		delayFunc: fibDuration,
+	}
 	var data url.Values
 
 	experr := "parse \":foo\": missing protocol scheme"
@@ -434,6 +448,7 @@ func TestAringoCallSuccess(t *testing.T) {
 	ari := &ARInGO{
 		httpClient:     http.DefaultClient,
 		reconnects:     -1,
+		delayFunc:      fibDuration,
 		evChannel:      make(chan map[string]interface{}),
 		errChannel:     make(chan error),
 		wsListenerExit: stopChan,
@@ -473,6 +488,7 @@ func TestAringoCallNoGET(t *testing.T) {
 	ari := &ARInGO{
 		httpClient:     http.DefaultClient,
 		reconnects:     -1,
+		delayFunc:      fibDuration,
 		evChannel:      make(chan map[string]interface{}),
 		errChannel:     make(chan error),
 		wsListenerExit: stopChan,
@@ -513,6 +529,7 @@ func TestAringoCallDoErr(t *testing.T) {
 	ari := &ARInGO{
 		httpClient:     http.DefaultClient,
 		reconnects:     -1,
+		delayFunc:      fibDuration,
 		evChannel:      make(chan map[string]interface{}),
 		errChannel:     make(chan error),
 		wsListenerExit: stopChan,
@@ -536,6 +553,7 @@ func TestAringoCall204(t *testing.T) {
 
 	ari := &ARInGO{
 		reconnects:     -1,
+		delayFunc:      fibDuration,
 		evChannel:      make(chan map[string]interface{}),
 		errChannel:     make(chan error),
 		wsListenerExit: stopChan,
@@ -566,6 +584,7 @@ func TestAringoCallNot200(t *testing.T) {
 
 	ari := &ARInGO{
 		reconnects:     -1,
+		delayFunc:      fibDuration,
 		evChannel:      make(chan map[string]interface{}),
 		errChannel:     make(chan error),
 		wsListenerExit: stopChan,
@@ -585,4 +604,16 @@ func TestAringoCallNot200(t *testing.T) {
 		t.Fatalf("\nExpected: <%+v>, \nReceived: <%+v>", experr, err)
 	}
 
+}
+
+func fibDuration(durationUnit, maxDuration time.Duration) func() time.Duration {
+	a, b := 0, 1
+	return func() time.Duration {
+		a, b = b, a+b
+		fibNrAsDuration := time.Duration(a) * durationUnit
+		if maxDuration > 0 && maxDuration < fibNrAsDuration {
+			return maxDuration
+		}
+		return fibNrAsDuration
+	}
 }
