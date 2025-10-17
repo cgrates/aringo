@@ -72,7 +72,7 @@ func TestAringoNewARInGONoConnAttempts(t *testing.T) {
 	reconnects := -1
 
 	experr := ErrZeroConnectAttempts
-	received, err := NewARInGO(wsUrl, wsOrigin, username, password, userAgent, evChannel,
+	received, err := NewARInGOV1(wsUrl, wsOrigin, username, password, userAgent, evChannel,
 		errChannel, stopChan, connectAttempts, reconnects, 0, fibDuration)
 
 	if err != experr {
@@ -82,7 +82,7 @@ func TestAringoNewARInGONoConnAttempts(t *testing.T) {
 	}
 }
 
-func TestAringoNewARInGO(t *testing.T) {
+func TestAringoNewARInGOV1(t *testing.T) {
 	username := ""
 	password := ""
 	userAgent := ""
@@ -101,7 +101,7 @@ func TestAringoNewARInGO(t *testing.T) {
 	wsOrigin := srv.URL[:n] + "/"
 	wsUrl := "ws" + strings.TrimPrefix(srv.URL, "http") + "/"
 
-	expected := &ARInGO{
+	expected := &ARInGOV1{
 		httpClient:     http.DefaultClient,
 		wsURL:          wsUrl,
 		wsOrigin:       wsOrigin,
@@ -113,7 +113,7 @@ func TestAringoNewARInGO(t *testing.T) {
 		errChannel:     errChannel,
 		wsListenerExit: stopChan,
 	}
-	received, err := NewARInGO(wsUrl, wsOrigin, username, password, userAgent, evChannel,
+	received, err := NewARInGOV1(wsUrl, wsOrigin, username, password, userAgent, evChannel,
 		errChannel, stopChan, connectAttempts, reconnects, 0, fibDuration)
 	expected.httpClient = received.httpClient
 	expected.ws = received.ws
@@ -145,7 +145,7 @@ func TestAringoNewARInGO(t *testing.T) {
 
 	}()
 
-	received, err = NewARInGO(wsUrl, wsOrigin, username, password, userAgent, evChannel,
+	received, err = NewARInGOV1(wsUrl, wsOrigin, username, password, userAgent, evChannel,
 		errChannel, stopChan, connectAttempts, reconnects, 0, fibDuration)
 
 	expected.httpClient = received.httpClient
@@ -177,7 +177,7 @@ func TestAringowsEventListenerValidJSON(t *testing.T) {
 	wsOrigin := srv.URL[:n] + "/"
 	wsUrl := "ws" + strings.TrimPrefix(srv.URL, "http") + "/"
 
-	ari := &ARInGO{
+	ari := &ARInGOV1{
 		httpClient:     new(http.Client),
 		wsURL:          wsUrl,
 		wsOrigin:       wsOrigin,
@@ -233,7 +233,7 @@ func TestAringowsEventListenerClosedCh(t *testing.T) {
 	wsOrigin := srv.URL[:n] + "/"
 	wsUrl := "ws" + strings.TrimPrefix(srv.URL, "http") + "/"
 
-	ari := &ARInGO{
+	ari := &ARInGOV1{
 		httpClient:     new(http.Client),
 		wsURL:          wsUrl,
 		wsOrigin:       wsOrigin,
@@ -276,7 +276,7 @@ func TestAringowsEventListenerReconnect(t *testing.T) {
 	wsOrigin := srv.URL[:n] + "/"
 	wsUrl := "ws" + strings.TrimPrefix(srv.URL, "http") + "/"
 
-	ari := &ARInGO{
+	ari := &ARInGOV1{
 		httpClient:     new(http.Client),
 		wsURL:          wsUrl,
 		wsOrigin:       wsOrigin,
@@ -310,7 +310,7 @@ func TestAringowsEventListenerInvalidJSONReturn(t *testing.T) {
 	stopChan := make(chan struct{})
 	var srv *httptest.Server
 
-	ari := &ARInGO{
+	ari := &ARInGOV1{
 		httpClient:     new(http.Client),
 		username:       "",
 		password:       "",
@@ -358,7 +358,7 @@ func TestAringowsEventListenerFailReconnect(t *testing.T) {
 	stopChan := make(chan struct{})
 	var srv *httptest.Server
 
-	ari := &ARInGO{
+	ari := &ARInGOV1{
 		httpClient:     new(http.Client),
 		username:       "",
 		password:       "",
@@ -411,7 +411,7 @@ func TestAringowsEventListenerFailReconnect(t *testing.T) {
 }
 
 func TestAringoCallUnrecognizedMethod(t *testing.T) {
-	ari := &ARInGO{
+	ari := &ARInGOV1{
 		delayFunc: fibDuration,
 	}
 	var data url.Values
@@ -427,7 +427,7 @@ func TestAringoCallUnrecognizedMethod(t *testing.T) {
 }
 
 func TestAringoCallInvalidURL(t *testing.T) {
-	ari := &ARInGO{
+	ari := &ARInGOV1{
 		delayFunc: fibDuration,
 	}
 	var data url.Values
@@ -445,7 +445,7 @@ func TestAringoCallInvalidURL(t *testing.T) {
 func TestAringoCallSuccess(t *testing.T) {
 	stopChan := make(chan struct{})
 	var srv *httptest.Server
-	ari := &ARInGO{
+	ari := &ARInGOV1{
 		httpClient:     http.DefaultClient,
 		reconnects:     -1,
 		delayFunc:      fibDuration,
@@ -485,7 +485,7 @@ func TestAringoCallSuccess(t *testing.T) {
 func TestAringoCallNoGET(t *testing.T) {
 	stopChan := make(chan struct{})
 	var srv *httptest.Server
-	ari := &ARInGO{
+	ari := &ARInGOV1{
 		httpClient:     http.DefaultClient,
 		reconnects:     -1,
 		delayFunc:      fibDuration,
@@ -526,7 +526,7 @@ func TestAringoCallNoGET(t *testing.T) {
 func TestAringoCallDoErr(t *testing.T) {
 	stopChan := make(chan struct{})
 
-	ari := &ARInGO{
+	ari := &ARInGOV1{
 		httpClient:     http.DefaultClient,
 		reconnects:     -1,
 		delayFunc:      fibDuration,
@@ -551,7 +551,7 @@ func TestAringoCall204(t *testing.T) {
 	stopChan := make(chan struct{})
 	var srv *httptest.Server
 
-	ari := &ARInGO{
+	ari := &ARInGOV1{
 		reconnects:     -1,
 		delayFunc:      fibDuration,
 		evChannel:      make(chan map[string]interface{}),
@@ -582,7 +582,7 @@ func TestAringoCallNot200(t *testing.T) {
 	stopChan := make(chan struct{})
 	var srv *httptest.Server
 
-	ari := &ARInGO{
+	ari := &ARInGOV1{
 		reconnects:     -1,
 		delayFunc:      fibDuration,
 		evChannel:      make(chan map[string]interface{}),

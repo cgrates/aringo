@@ -8,21 +8,18 @@ Provides Asterisk ARI connector from Go programming language.
 package aringo
 
 import (
-	"bytes"
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
-	"net/url"
+	"sync"
 	"time"
 
-	"golang.org/x/net/websocket"
-)
+	"github.com/coder/websocket/wsjson"
+	"github.com/google/uuid"
 
-const (
-	HTTP_POST   = "POST"
-	HTTP_GET    = "GET"
-	HTTP_DELETE = "DELETE"
+	"github.com/coder/websocket"
 )
 
 var (
@@ -80,6 +77,39 @@ type ARInGO struct {
 	evChannel            chan map[string]interface{}                             // Events coming from Asterisk are posted here
 	errChannel           chan error                                              // Errors are posted here
 	wsListenerExit       <-chan struct{}                                         // Signal dispatcher to stop listening
+	pendingMu            sync.Mutex                                              // Protects pending map
+	pending              map[string]chan RESTResponse                            // request_id -> typed RESTResponse
+}
+
+// RESTRequest represents an ARI REST-over-WebSocket request envelope.
+type RESTRequest struct {
+	Type          string        `json:"type"` // must be "RESTRequest"
+	TransactionID string        `json:"transaction_id,omitempty"`
+	RequestID     string        `json:"request_id"`
+	Method        string        `json:"method"`
+	URI           string        `json:"uri"`
+	ContentType   string        `json:"content_type,omitempty"`
+	QueryStrings  []QueryString `json:"query_strings,omitempty"`
+}
+
+type QueryString struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
+}
+
+// RESTResponse represents an ARI REST-over-WebSocket response envelope.
+type RESTResponse struct {
+	Type          string `json:"type"`
+	TransactionID string `json:"transaction_id,omitempty"`
+	RequestID     string `json:"request_id"`
+	StatusCode    int    `json:"status_code"`
+	ReasonPhrase  string `json:"reason_phrase,omitempty"`
+	ContentType   string `json:"content_type,omitempty"`
+	Uri           string `json:"uri,omitempty"`
+	MessageBody   string `json:"message_body,omitempty"`
+	Timestamp     string `json:"timestamp,omitempty"`
+	AsteriskID    string `json:"asterisk_id,omitempty"`
+	Application   string `json:"application,omitempty"`
 }
 
 // wsDispatcher listens for JSON rawMessages and stores them into the evChannel
@@ -91,8 +121,9 @@ func (ari *ARInGO) wsEventListener() {
 			return
 		default:
 		}
-		var ev map[string]interface{}
-		if err := websocket.JSON.Receive(ari.ws, &ev); err != nil {
+		var ev map[string]any
+		_, data, err := ari.ws.Read(context.Background())
+		if err != nil {
 			ari.disconnect()
 			select {
 			case <-ari.wsListenerExit:
@@ -112,14 +143,43 @@ func (ari *ARInGO) wsEventListener() {
 			}
 			return
 		}
+		if err := json.Unmarshal(data, &ev); err != nil {
+			continue
+		}
+		// If this is a RESTResponse, try to correlate and resolve waiter
+		if t, ok := ev["type"].(string); ok && t == "RESTResponse" {
+			var rr RESTResponse
+			if err := json.Unmarshal(data, &rr); err != nil {
+				continue
+			}
+			ari.pendingMu.Lock()
+			ch, exists := ari.pending[rr.RequestID]
+			if exists {
+				delete(ari.pending, rr.RequestID)
+			}
+			ari.pendingMu.Unlock()
+			if exists {
+				ch <- rr
+				close(ch)
+				continue
+			}
+
+		}
 		ari.evChannel <- ev
 	}
 }
 
 // connect connects to Asterisk Websocket and starts listener
 func (ari *ARInGO) connect() (err error) {
-	if ari.ws, err = websocket.Dial(ari.wsURL, "", ari.wsOrigin); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	var c *websocket.Conn
+	if c, _, err = websocket.Dial(ctx, ari.wsURL, nil); err != nil {
 		return
+	}
+	ari.ws = c
+	if ari.pending == nil {
+		ari.pending = make(map[string]chan RESTResponse)
 	}
 	// Connected, start listener
 	go ari.wsEventListener()
@@ -127,49 +187,55 @@ func (ari *ARInGO) connect() (err error) {
 }
 
 func (ari *ARInGO) disconnect() error {
-	return ari.ws.Close()
+	if ari.ws == nil {
+		return nil
+	}
+	return ari.ws.Close(websocket.StatusNormalClosure, "")
 }
 
-// Call represents one REST call to Asterisk using httpClient call
-// If there is a reply from Asterisk it should be in form map[string]interface{}
-func (ari *ARInGO) Call(method, reqURL string, data url.Values) (reply []byte, err error) {
-	var reqBody io.Reader
-	switch method {
-	case HTTP_GET: // Add data inside url
-		u, _ := url.ParseRequestURI(reqURL)
-		u.RawQuery = data.Encode()
-		reqURL = u.String()
-	case HTTP_POST, HTTP_DELETE:
-		reqBody = bytes.NewBufferString(data.Encode())
-	default:
-		err = fmt.Errorf("Unrecognized method: %s", method)
-		return
+func (ari *ARInGO) Call(method, uri string, queryStr map[string]string, bodyParams map[string]string) (RESTResponse, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if ari.ws == nil {
+		return RESTResponse{}, errors.New("websocket not connected")
 	}
-	var req *http.Request
-	if req, err = http.NewRequest(method, reqURL, reqBody); err != nil {
-		return
+	requestID := fmt.Sprintf("%d", time.Now().UnixNano())
+	transactionID := uuid.New().String()
+	var qs []QueryString
+	for k, val := range queryStr {
+		qs = append(qs, QueryString{Name: k, Value: val})
 	}
-	req.Header.Set("User-Agent", ari.userAgent)
-	req.SetBasicAuth(ari.username, ari.password)
-	var resp *http.Response
-	if resp, err = ari.httpClient.Do(req); err != nil {
-		return
+	for k, val := range bodyParams {
+		qs = append(qs, QueryString{Name: k, Value: val})
 	}
-	if resp.StatusCode == 204 { // No content status code
-		return
+	rr := RESTRequest{
+		Type:          "RESTRequest",
+		TransactionID: transactionID,
+		RequestID:     requestID,
+		Method:        method,
+		URI:           uri,
+		ContentType:   "application/json",
+		QueryStrings:  qs,
 	}
-	if resp.StatusCode != 200 {
-		err = NewErrUnexpectedReplyCode(resp.StatusCode)
-		return
+	respCh := make(chan RESTResponse, 1)
+	ari.pendingMu.Lock()
+	ari.pending[requestID] = respCh
+	ari.pendingMu.Unlock()
+	if err := wsjson.Write(ctx, ari.ws, rr); err != nil {
+		ari.pendingMu.Lock()
+		delete(ari.pending, requestID)
+		ari.pendingMu.Unlock()
+		return RESTResponse{}, err
 	}
-	var respBody []byte
-	respBody, err = io.ReadAll(resp.Body)
-	resp.Body.Close()
-	if err != nil ||
-		method != HTTP_GET {
-		return
-	}
-	reply = respBody
-	return
 
+	// Wait for response or context cancellation
+	select {
+	case resp := <-respCh:
+		return resp, nil
+	case <-ctx.Done():
+		ari.pendingMu.Lock()
+		delete(ari.pending, requestID)
+		ari.pendingMu.Unlock()
+		return RESTResponse{}, ctx.Err()
+	}
 }
