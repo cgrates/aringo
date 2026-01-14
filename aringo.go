@@ -74,7 +74,7 @@ type ARInGO struct {
 	reconnects           int
 	maxReconnectInterval time.Duration
 	delayFunc            func(time.Duration, time.Duration) func() time.Duration // used to create/reset the delay function
-	evChannel            chan map[string]interface{}                             // Events coming from Asterisk are posted here
+	evChannel            chan map[string]any                                     // Events coming from Asterisk are posted here
 	errChannel           chan error                                              // Errors are posted here
 	wsListenerExit       <-chan struct{}                                         // Signal dispatcher to stop listening
 	pendingMu            sync.Mutex                                              // Protects pending map
@@ -193,6 +193,7 @@ func (ari *ARInGO) disconnect() error {
 	return ari.ws.Close(websocket.StatusNormalClosure, "")
 }
 
+// Call sends a REST request over WebSocket, merging both query and body params into the payload
 func (ari *ARInGO) Call(method, uri string, queryStr map[string]string, bodyParams map[string]string) (RESTResponse, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

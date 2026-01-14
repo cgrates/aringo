@@ -125,7 +125,6 @@ func (ari *ARInGOV1) disconnect() error {
 }
 
 // Call represents one REST call to Asterisk using httpClient call
-// If there is a reply from Asterisk it should be in form map[string]interface{}
 func (ari *ARInGOV1) Call(method, uri string, queryStr map[string]string, bodyParams map[string]string) (reply RESTResponse, err error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
