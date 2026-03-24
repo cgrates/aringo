@@ -90,6 +90,7 @@ type RESTRequest struct {
 	URI           string        `json:"uri"`
 	ContentType   string        `json:"content_type,omitempty"`
 	QueryStrings  []QueryString `json:"query_strings,omitempty"`
+	MessageBody   string        `json:"message_body,omitempty"`
 }
 
 type QueryString struct {
@@ -193,8 +194,8 @@ func (ari *ARInGO) disconnect() error {
 	return ari.ws.Close(websocket.StatusNormalClosure, "")
 }
 
-// Call sends a REST request over WebSocket, merging both query and body params into the payload
-func (ari *ARInGO) Call(method, uri string, queryStr map[string]string, bodyParams map[string]string) (RESTResponse, error) {
+// Call sends a REST request over WebSocket with optional query params and JSON body.
+func (ari *ARInGO) Call(method, uri string, queryStr map[string]string, body []byte) (RESTResponse, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if ari.ws == nil {
@@ -206,17 +207,17 @@ func (ari *ARInGO) Call(method, uri string, queryStr map[string]string, bodyPara
 	for k, val := range queryStr {
 		qs = append(qs, QueryString{Name: k, Value: val})
 	}
-	for k, val := range bodyParams {
-		qs = append(qs, QueryString{Name: k, Value: val})
-	}
 	rr := RESTRequest{
 		Type:          "RESTRequest",
 		TransactionID: transactionID,
 		RequestID:     requestID,
 		Method:        method,
 		URI:           uri,
-		ContentType:   "application/json",
 		QueryStrings:  qs,
+	}
+	if len(body) > 0 {
+		rr.ContentType = "application/json"
+		rr.MessageBody = string(body)
 	}
 	respCh := make(chan RESTResponse, 1)
 	ari.pendingMu.Lock()

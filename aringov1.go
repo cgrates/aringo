@@ -23,6 +23,7 @@ const (
 	HTTP_POST   = "POST"
 	HTTP_GET    = "GET"
 	HTTP_DELETE = "DELETE"
+	HTTP_PUT    = "PUT"
 )
 
 func NewARInGOV1(wsUrl, wsOrigin, username, password, address, userAgent string, evChannel chan map[string]interface{},
@@ -125,7 +126,7 @@ func (ari *ARInGOV1) disconnect() error {
 }
 
 // Call represents one REST call to Asterisk using httpClient call
-func (ari *ARInGOV1) Call(method, uri string, queryStr map[string]string, bodyParams map[string]string) (reply RESTResponse, err error) {
+func (ari *ARInGOV1) Call(method, uri string, queryStr map[string]string, body []byte) (reply RESTResponse, err error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	fullURL := fmt.Sprintf("http://%s/ari/%s", ari.address, uri)
@@ -138,34 +139,25 @@ func (ari *ARInGOV1) Call(method, uri string, queryStr map[string]string, bodyPa
 		u.RawQuery = q.Encode()
 		fullURL = u.String()
 	}
-
 	var reqBody io.Reader
-
-	if len(bodyParams) > 0 {
-		data := url.Values{}
-		for k, v := range bodyParams {
-			data.Set(k, v)
-		}
-		reqBody = bytes.NewBufferString(data.Encode())
+	if len(body) > 0 {
+		reqBody = bytes.NewReader(body)
 	}
-
 	req, err := http.NewRequestWithContext(ctx, method, fullURL, reqBody)
 	if err != nil {
 		return RESTResponse{}, err
 	}
 	req.Header.Set("User-Agent", ari.userAgent)
 	req.SetBasicAuth(ari.username, ari.password)
-	if method != http.MethodGet && reqBody != nil {
-		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	if reqBody != nil {
+		req.Header.Set("Content-Type", "application/json")
 	}
-
 	resp, err := ari.httpClient.Do(req)
 	if err != nil {
 		return RESTResponse{}, err
 	}
 	defer resp.Body.Close()
 	bodyBytes, _ := io.ReadAll(resp.Body)
-
 	return RESTResponse{
 		StatusCode:  resp.StatusCode,
 		MessageBody: string(bodyBytes),

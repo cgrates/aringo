@@ -11,10 +11,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"reflect"
 	"strings"
 	"testing"
@@ -444,8 +442,7 @@ func TestAringoV1CallPOSTSuccess(t *testing.T) {
 			t.Errorf("Expected POST method, got %s", r.Method)
 		}
 
-		body, _ := io.ReadAll(r.Body)
-		vals, _ := url.ParseQuery(string(body))
+		vals := r.URL.Query()
 		if vals.Get("channel") != "SIP/1000" {
 			t.Errorf("Expected body param channel=SIP/1000, got %s", vals.Get("channel"))
 		}
@@ -464,7 +461,7 @@ func TestAringoV1CallPOSTSuccess(t *testing.T) {
 		wsListenerExit: stopChan,
 	}
 
-	resp, err := ari.Call(HTTP_POST, "", nil, map[string]string{"channel": "SIP/1000"})
+	resp, err := ari.Call(HTTP_POST, "", map[string]string{"channel": "SIP/1000"}, nil)
 	if err != nil {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
@@ -541,8 +538,8 @@ func TestAringoV1CallWithQueryAndBody(t *testing.T) {
 		if r.URL.Query().Get("app") != "myapp" {
 			t.Errorf("Expected query param app=myapp, got %s", r.URL.Query().Get("app"))
 		}
-		body, _ := io.ReadAll(r.Body)
-		vals, _ := url.ParseQuery(string(body))
+
+		vals := r.URL.Query()
 		if vals.Get("endpoint") != "PJSIP/1000" {
 			t.Errorf("Expected body param endpoint=PJSIP/1000, got %s", vals.Get("endpoint"))
 		}
@@ -562,8 +559,7 @@ func TestAringoV1CallWithQueryAndBody(t *testing.T) {
 	}
 
 	resp, err := ari.Call(HTTP_POST, "channels",
-		map[string]string{"app": "myapp"},
-		map[string]string{"endpoint": "PJSIP/1000"})
+		map[string]string{"app": "myapp", "endpoint": "PJSIP/1000"}, nil)
 	if err != nil {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
@@ -741,8 +737,8 @@ func TestARInGOCallWithQueryStrings(t *testing.T) {
 	defer ari.disconnect()
 
 	_, err = ari.Call(HTTP_POST, "channels",
-		map[string]string{"app": "myapp", "channelId": "chan123"},
-		map[string]string{"endpoint": "PJSIP/1000", "timeout": "30"})
+		map[string]string{"app": "myapp", "channelId": "chan123", "endpoint": "PJSIP/1000", "timeout": "30"},
+		nil)
 	if err != nil {
 		t.Fatalf("Call failed: %v", err)
 	}
