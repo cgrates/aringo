@@ -1,9 +1,5 @@
-/*
-Released under MIT License <http://www.opensource.org/licenses/mit-license.php
-Copyright (C) ITsysCOM GmbH. All Rights Reserved.
-
-Provides Asterisk ARI connector from Go programming language.
-*/
+// Copyright ITsysCOM GmbH
+// SPDX-License-Identifier: MIT
 
 package aringo
 
